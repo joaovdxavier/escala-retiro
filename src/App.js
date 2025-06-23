@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef} from "react";
 import * as XLSX from "xlsx";
 
 const ministerios = [
@@ -17,8 +17,16 @@ const servos = [
   "JAQUELINE", "JOHAB", "CARLOS"
 ];
 
+async function generateHash(text) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(text);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 const CREDENTIALS = [
-  { username: "coordenador", password: "meufilhotumeamas" }
+  { username: "coordenador", password: "d0a23338fa8e9f4c015604c0f2ada8088cd17ecfa861e966dcb1c4b953bc1c08" }
 ];
 
 const diasRef = {
@@ -104,6 +112,8 @@ function App() {
   const [loginPass, setLoginPass] = useState("");
   const [exportType, setExportType] = useState(null);
   const [exportValue, setExportValue] = useState("");
+  const scrollContainerRef = useRef(null);
+  const topScrollRef = useRef(null);
 
   const [tab, setTab] = useState("programacao");
 
@@ -233,9 +243,10 @@ function App() {
     setExportValue("");
   };
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
+    const passHash = await generateHash(loginPass);
     const valid = CREDENTIALS.some(
-      (cred) => cred.username === loginUser && cred.password === loginPass
+      (cred) => cred.username === loginUser && cred.password === passHash
     );
     if (valid) {
       setAuthenticated(true);
@@ -288,83 +299,54 @@ function App() {
         <button className={`px-4 py-2 rounded ${tab === 'horarios' ? 'bg-blue-600 text-white' : 'bg-gray-300'}`} onClick={() => setTab("horarios")}>Por Horário</button>
       </div>
 
-      {tab === "programacao" ? (
-        <table className="border-collapse border border-gray-400 w-full text-sm">
-          <thead>
-            <tr>
-              <th className="border border-gray-300 px-4 py-2">Dia</th>
-              <th className="border border-gray-300 px-4 py-2">Hora</th>
-              <th className="border border-gray-300 px-4 py-2">Atividade</th>
-              {servos.map((s, idx) => (
-                <th key={idx} className="border border-gray-300 px-2 py-2 text-xs whitespace-nowrap">{s}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {programacao.map((prog, rowIndex) => (
-              <tr key={rowIndex}>
-                <td className="border border-gray-300 px-2 py-2">{prog.dia}</td>
-                <td className="border border-gray-300 px-2 py-2">{prog.hora}</td>
-                <td className="border border-gray-300 px-2 py-2">{prog.atividade}</td>
-                {servos.map((_, colIndex) => (
-                  <td key={colIndex} className="border border-gray-300 px-2 py-2">
-                    <select
-                      disabled={authenticated === false}
-                      value={data[rowIndex][colIndex]}
-                      onChange={(e) => {
-                        const selected = e.target.value;
-                        if (getConflictingAssignment(rowIndex, colIndex, selected)) {
-                          alert(`Conflito detectado: ${servos[colIndex]} já está designado para ${selected} nesse mesmo horário.`);
-                          return;
-                        }
-                        const newData = [...data];
-                        newData[rowIndex][colIndex] = selected;
-                        setData(newData);
-                      }}
-                      className={`w-full min-w-[140px] p-2 border border-gray-200 rounded text-sm ${getColorClass(data[rowIndex][colIndex])}`}
-                    >
-                      <option value="">--</option>
-                      {ministerios.map((minist, idx) => (
-                        <option key={idx} value={minist}>{minist}</option>
-                      ))}
-                    </select>
-                  </td>
+      <div
+        className="overflow-x-auto mb-2"
+        ref={topScrollRef}
+        onScroll={() => {
+          if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+          }
+        }}
+      ></div>
+
+      <div className="overflow-auto" ref={scrollContainerRef}>
+        <div className="overflow-x-auto mb-2">
+          <div style={{ minWidth: scrollContainerRef.current?.scrollWidth }} />
+        </div>
+        {tab === "programacao" ? (
+          <table className="border-collapse border border-gray-400 w-full text-sm">
+            <thead>
+              <tr>
+                <th className="border border-gray-300 px-4 py-2">Dia</th>
+                <th className="border border-gray-300 px-4 py-2">Hora</th>
+                <th className="border border-gray-300 px-4 py-2">Atividade</th>
+                {servos.map((s, idx) => (
+                  <th key={idx} className="border border-gray-300 px-2 py-2 text-xs whitespace-nowrap">{s}</th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <table className="border-collapse border border-gray-400 w-full text-sm">
-          <thead>
-            <tr>
-              <th className="border border-gray-300 px-4 py-2">Horário</th>
-              {servos.map((s, idx) => (
-                <th key={idx} className="border border-gray-300 px-2 py-2 text-xs whitespace-nowrap">{s}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {timeSlots.map((slot, rowIndex) => (
-              <tr key={rowIndex}>
-                <td className="border border-gray-300 px-2 py-2 font-semibold whitespace-nowrap">{slot.label}</td>
-                {servos.map((_, colIndex) => {
-                  if (!timeSlotData[rowIndex]) timeSlotData[rowIndex] = Array(servos.length).fill("");
-                  const ministry = timeSlotData[rowIndex][colIndex] || getMinistryForSlot(colIndex, slot.start);
-                  const handleChange = (e) => {
-                    const selected = e.target.value;
-                    const newSlotData = [...timeSlotData];
-                    if (!newSlotData[rowIndex]) newSlotData[rowIndex] = Array(servos.length).fill("");
-                    newSlotData[rowIndex][colIndex] = selected;
-                    setTimeSlotData(newSlotData);
-                  };
-                  return (
+            </thead>
+            <tbody>
+              {programacao.map((prog, rowIndex) => (
+                <tr key={rowIndex}>
+                  <td className="border border-gray-300 px-2 py-2">{prog.dia}</td>
+                  <td className="border border-gray-300 px-2 py-2">{prog.hora}</td>
+                  <td className="border border-gray-300 px-2 py-2">{prog.atividade}</td>
+                  {servos.map((_, colIndex) => (
                     <td key={colIndex} className="border border-gray-300 px-2 py-2">
                       <select
                         disabled={authenticated === false}
-                        value={ministry}
-                        onChange={handleChange}
-                        className={`w-full min-w-[140px] p-2 border border-gray-200 rounded text-sm ${getColorClass(ministry)}`}
+                        value={data[rowIndex][colIndex]}
+                        onChange={(e) => {
+                          const selected = e.target.value;
+                          if (getConflictingAssignment(rowIndex, colIndex, selected)) {
+                            alert(`Conflito detectado: ${servos[colIndex]} já está designado para ${selected} nesse mesmo horário.`);
+                            return;
+                          }
+                          const newData = [...data];
+                          newData[rowIndex][colIndex] = selected;
+                          setData(newData);
+                        }}
+                        className={`w-full min-w-[140px] p-2 border border-gray-200 rounded text-sm ${getColorClass(data[rowIndex][colIndex])}`}
                       >
                         <option value="">--</option>
                         {ministerios.map((minist, idx) => (
@@ -372,13 +354,57 @@ function App() {
                         ))}
                       </select>
                     </td>
-                  );
-                })}
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <table className="border-collapse border border-gray-400 w-full text-sm">
+            <thead>
+              <tr>
+                <th className="border border-gray-300 px-4 py-2">Horário</th>
+                {servos.map((s, idx) => (
+                  <th key={idx} className="border border-gray-300 px-2 py-2 text-xs whitespace-nowrap">{s}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody>
+              {timeSlots.map((slot, rowIndex) => (
+                <tr key={rowIndex}>
+                  <td className="border border-gray-300 px-2 py-2 font-semibold whitespace-nowrap">{slot.label}</td>
+                  {servos.map((_, colIndex) => {
+                    if (!timeSlotData[rowIndex]) timeSlotData[rowIndex] = Array(servos.length).fill("");
+                    const ministry = timeSlotData[rowIndex][colIndex] || getMinistryForSlot(colIndex, slot.start);
+                    const handleChange = (e) => {
+                      const selected = e.target.value;
+                      const newSlotData = [...timeSlotData];
+                      if (!newSlotData[rowIndex]) newSlotData[rowIndex] = Array(servos.length).fill("");
+                      newSlotData[rowIndex][colIndex] = selected;
+                      setTimeSlotData(newSlotData);
+                    };
+                    return (
+                      <td key={colIndex} className="border border-gray-300 px-2 py-2">
+                        <select
+                          disabled={authenticated === false}
+                          value={ministry}
+                          onChange={handleChange}
+                          className={`w-full min-w-[140px] p-2 border border-gray-200 rounded text-sm ${getColorClass(ministry)}`}
+                        >
+                          <option value="">--</option>
+                          {ministerios.map((minist, idx) => (
+                            <option key={idx} value={minist}>{minist}</option>
+                          ))}
+                        </select>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       <div className="mt-4 space-x-2">
         <button onClick={exportToExcel} className="px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700">
