@@ -19,8 +19,7 @@ const servos = [
 ];
 
 const CREDENTIALS = [
-  { username: "coordenador", password: "d0a23338fa8e9f4c015604c0f2ada8088cd17ecfa861e966dcb1c4b953bc1c08" },
-  { username: "admin", password: "1234" }
+  { username: "coordenador", password: "829128d4a01e25ce288f46c39f33a36630666670cb1c6207288885f0ef7398c7" }
 ];
 
 const programacao = [
@@ -120,9 +119,10 @@ function App() {
   const [selectedExportItem, setSelectedExportItem] = useState(""); // nome do servo ou ministério
 
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
+    const senhaHash = await gerarHashSenha(loginPass);
     const valid = CREDENTIALS.some(
-      (cred) => cred.username === loginUser && cred.password === loginPass
+      (cred) => cred.username === loginUser && cred.password === senhaHash
     );
     if (valid) {
       setAuthenticated(true);
@@ -283,6 +283,16 @@ function App() {
       default: return "";
     }
   };
+
+  async function gerarHashSenha(senha) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(senha);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    // converte bytes para string hexadecimal
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+    return hashHex;
+  }
 
   const getDiaBackgroundClass = (dia) => {
     switch (dia) {
