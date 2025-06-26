@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef} from "react";
+import React, { useState, useRef } from "react";
 import * as XLSX from "xlsx";
+
 
 const ministerios = [
   "Intercessão", "Música", "Ordem", "Comunicação",
@@ -17,25 +18,10 @@ const servos = [
   "JAQUELINE", "JOHAB", "CARLOS"
 ];
 
-async function generateHash(text) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(text);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
 const CREDENTIALS = [
-  { username: "coordenador", password: "d0a23338fa8e9f4c015604c0f2ada8088cd17ecfa861e966dcb1c4b953bc1c08" }
+  { username: "coordenador", password: "d0a23338fa8e9f4c015604c0f2ada8088cd17ecfa861e966dcb1c4b953bc1c08" },
+  { username: "admin", password: "1234" }
 ];
-
-const diasRef = {
-  "SEXTA": "2025-06-13",
-  "SÁBADO": "2025-06-14",
-  "DOMINGO": "2025-06-15"
-};
-
-const parseHorario = (dia, hora) => new Date(`${diasRef[dia]}T${hora}:00`);
 
 const programacao = [
   { dia: "SEXTA", hora: "12:00", atividade: "Credenciamento dos campistas" },
@@ -92,161 +78,51 @@ const programacao = [
   { dia: "DOMINGO", hora: "19:30", atividade: "Encerramento" }
 ];
 
-const getColorClass = (value) => {
-  switch (value) {
-    case "Intercessão": return "bg-red-500 text-white";
-    case "Música": return "bg-blue-500 text-white";
-    case "Ordem": return "bg-gray-500 text-white";
-    case "Comunicação": return "bg-pink-500 text-white";
-    case "Liturgia": return "bg-purple-600 text-white";
-    case "Louvor": return "bg-orange-500 text-black";
-    case "Limpeza": return "bg-green-500 text-white";
-    case "Lazer": return "bg-yellow-500 text-white";
-    default: return "";
-  }
-};
+<style>
+  {`
+    table th:nth-child(1),
+    table td:nth-child(1) {
+      position: sticky;
+      left: 0;
+      background-color: white;
+      z-index: 3;
+      box-shadow: 2px 0 5px -2px rgba(0,0,0,0.3);
+    }
+    table th:nth-child(2),
+    table td:nth-child(2) {
+      position: sticky;
+      left: 120px;
+      background-color: white;
+      z-index: 3;
+      box-shadow: 2px 0 5px -2px rgba(0,0,0,0.2);
+    }
+    table th:nth-child(3),
+    table td:nth-child(3) {
+      position: sticky;
+      left: 280px;
+      background-color: white;
+      z-index: 3;
+      box-shadow: 2px 0 5px -2px rgba(0,0,0,0.1);
+    }
+  `}
+</style>
 
 function App() {
   const [authenticated, setAuthenticated] = useState(null);
   const [loginUser, setLoginUser] = useState("");
   const [loginPass, setLoginPass] = useState("");
-  const [exportType, setExportType] = useState(null);
-  const [exportValue, setExportValue] = useState("");
-  const scrollContainerRef = useRef(null);
-  const topScrollRef = useRef(null);
-
-  const [tab, setTab] = useState("programacao");
-
   const [data, setData] = useState(() => {
     const stored = localStorage.getItem("escalaData");
-    const parsed = stored ? JSON.parse(stored) : [];
-    return programacao.map((_, i) =>
-      parsed[i] && Array.isArray(parsed[i])
-        ? parsed[i].slice(0, servos.length).concat(Array(servos.length).fill("")).slice(0, servos.length)
-        : Array(servos.length).fill("")
-    );
+    return stored ? JSON.parse(stored) : {};
   });
+    // Estado para controlar filtro e seleção
+  const [exportType, setExportType] = useState(null); // "servo" ou "ministerio"
+  const [selectedExportItem, setSelectedExportItem] = useState(""); // nome do servo ou ministério
 
-  const [timeSlotData, setTimeSlotData] = useState(() => {
-    const stored = localStorage.getItem("horarioData");
-    return stored ? JSON.parse(stored) : [];
-  });
 
-  useEffect(() => {
-    localStorage.setItem("escalaData", JSON.stringify(data));
-  }, [data]);
-
-  useEffect(() => {
-    localStorage.setItem("horarioData", JSON.stringify(timeSlotData));
-  }, [timeSlotData]);
-
-  const startTime = parseHorario(programacao[0].dia, programacao[0].hora);
-  const endTime = parseHorario(programacao[programacao.length - 1].dia, programacao[programacao.length - 1].hora);
-
-  const timeSlots = [];
-  let current = new Date(startTime);
-  while (current <= endTime) {
-    const next = new Date(current.getTime() + 30 * 60000);
-    timeSlots.push({
-      label: `${current.toLocaleString('pt-BR', { weekday: 'short' })} ${current.getHours().toString().padStart(2, '0')}:${current.getMinutes().toString().padStart(2, '0')} - ${next.getHours().toString().padStart(2, '0')}:${next.getMinutes().toString().padStart(2, '0')}`,
-      start: new Date(current),
-      end: next
-    });
-    current = next;
-  }
-
-  const getConflictingAssignment = (rowIndex, colIndex, selectedMinistry) => {
-    const currentTime = parseHorario(programacao[rowIndex].dia, programacao[rowIndex].hora);
-    for (let i = 0; i < programacao.length; i++) {
-      if (i !== rowIndex && parseHorario(programacao[i].dia, programacao[i].hora).getTime() === currentTime.getTime()) {
-        if (data[i][colIndex] === selectedMinistry) {
-          return true;
-        }
-      }
-    }
-    return false;
-  };
-
-  const getMinistryForSlot = (servoIndex, slotStart) => {
-    for (let i = 0; i < programacao.length; i++) {
-      const progStart = parseHorario(programacao[i].dia, programacao[i].hora);
-      const progEnd = new Date(progStart.getTime() + 30 * 60000);
-      if (slotStart >= progStart && slotStart < progEnd) {
-        return data[i][servoIndex];
-      }
-    }
-    return "";
-  };
-
-  const exportToExcel = () => {
-    const ws_data = [["Dia", "Hora", "Atividade", ...servos], ...programacao.map((item, i) => [item.dia, item.hora, item.atividade, ...data[i]])];
-    const ws = XLSX.utils.aoa_to_sheet(ws_data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Escala");
-    XLSX.writeFile(wb, "Escala_AbbaCamp.xlsx");
-  };
-
-  const exportFiltered = () => {
-    if (!exportValue || (exportType === "ministry" ? !ministerios.includes(exportValue) : !servos.includes(exportValue))) {
-      alert("Seleção inválida.");
-      return;
-    }
-
-    const wb = XLSX.utils.book_new();
-
-    if (exportType === "ministry") {
-      const filteredProg = [["Dia", "Hora", "Atividade", "Servo"]];
-      programacao.forEach((item, i) => {
-        if (!data[i]) return;
-        servos.forEach((servo, j) => {
-          if (data[i][j] === exportValue) {
-            filteredProg.push([item.dia, item.hora, item.atividade, servo]);
-          }
-        });
-      });
-
-      const filteredHorario = [["Horário", "Servo"]];
-      timeSlots.forEach((slot, i) => {
-        servos.forEach((servo, j) => {
-          const val = timeSlotData[i]?.[j] || getMinistryForSlot(j, slot.start);
-          if (val === exportValue) {
-            filteredHorario.push([slot.label, servo]);
-          }
-        });
-      });
-
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filteredProg), exportValue + "_Programacao");
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filteredHorario), exportValue + "_Horarios");
-    } else {
-      const index = servos.indexOf(exportValue);
-      const filteredProg = [["Dia", "Hora", "Atividade", "Ministério"]];
-      programacao.forEach((item, i) => {
-        if (data[i]?.[index]) {
-          filteredProg.push([item.dia, item.hora, item.atividade, data[i][index]]);
-        }
-      });
-
-      const filteredHorario = [["Horário", "Ministério"]];
-      timeSlots.forEach((slot, i) => {
-        const val = timeSlotData[i]?.[index] || getMinistryForSlot(index, slot.start);
-        if (val) {
-          filteredHorario.push([slot.label, val]);
-        }
-      });
-
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filteredProg), exportValue + "_Programacao");
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filteredHorario), exportValue + "_Horarios");
-    }
-
-    XLSX.writeFile(wb, `Escala_AbbaCamp_${exportValue}.xlsx`);
-    setExportType(null);
-    setExportValue("");
-  };
-
-  const handleLogin = async () => {
-    const passHash = await generateHash(loginPass);
+  const handleLogin = () => {
     const valid = CREDENTIALS.some(
-      (cred) => cred.username === loginUser && cred.password === passHash
+      (cred) => cred.username === loginUser && cred.password === loginPass
     );
     if (valid) {
       setAuthenticated(true);
@@ -254,6 +130,110 @@ function App() {
       alert("Credenciais inválidas.");
     }
   };
+
+  function exportPlanilhaCompleta(blocos, servos, data) {
+    const rows = blocos.map((bloco, i) => {
+      const row = {
+        Dia: bloco.dia,
+        Horário: `${bloco.inicio} - ${bloco.fim}`,
+        Programações: bloco.atividades.join(", ") || "--"
+      };
+      servos.forEach((servo, j) => {
+        row[servo] = data[`${i}-${j}`] || "--";
+      });
+      return row;
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Escala Completa");
+    XLSX.writeFile(wb, "escala_completa.xlsx");
+  }
+
+   function exportPorServoSelecionado(blocos, servos, data, servoSelecionado) {
+    if (!servoSelecionado) {
+      alert("Selecione um servo para exportar.");
+      return;
+    }
+    const wb = XLSX.utils.book_new();
+
+    const j = servos.indexOf(servoSelecionado);
+    if (j === -1) {
+      alert("Servo inválido.");
+      return;
+    }
+
+    const rows = blocos.map((bloco, i) => ({
+      Dia: bloco.dia,
+      Horário: `${bloco.inicio} - ${bloco.fim}`,
+      Programação: `${bloco.atividades.join(", ")}`,
+      Ministério: data[`${i}-${j}`] || "--"
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, servoSelecionado.substring(0, 30));
+    XLSX.writeFile(wb, `escala_${servoSelecionado}.xlsx`);
+  }
+
+  function exportPorMinisterioSelecionado(blocos, servos, data, ministerioSelecionado) {
+    if (!ministerioSelecionado) {
+      alert("Selecione um ministério para exportar.");
+      return;
+    }
+
+    const wb = XLSX.utils.book_new();
+
+    const rows = blocos.map((bloco, i) => {
+      const presentes = servos
+        .map((servo, j) => (data[`${i}-${j}`] === ministerioSelecionado ? servo : null))
+        .filter((x) => x !== null);
+      return {
+        Dia: bloco.dia,
+        Horário: `${bloco.inicio} - ${bloco.fim}`,
+        Programação: `${bloco.atividades.join(", ")}`,
+        Servos: presentes.length ? presentes.join(", ") : "--"
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, ministerioSelecionado.substring(0, 30));
+    XLSX.writeFile(wb, `escala_${ministerioSelecionado}.xlsx`);
+  }
+
+  // Gerar faixas de 30min (12:00 a 20:00 como exemplo)
+  const gerarBlocos = () => {
+    const dias = [...new Set(programacao.map(p => p.dia))];
+    const blocos = [];
+
+    dias.forEach(dia => {
+      const progDia = programacao.filter(p => p.dia === dia);
+      const horas = progDia.map(p => p.hora).sort();
+      const minHora = horas[0];
+      const maxHora = horas[horas.length - 1];
+
+      const start = new Date(`2025-06-13T${minHora}`);
+      const end = new Date(`2025-06-13T${maxHora}`);
+      end.setMinutes(end.getMinutes() + 30);
+
+      let current = start;
+      while (current < end) {
+        const next = new Date(current.getTime() + 30 * 60000);
+        blocos.push({
+          dia,
+          inicio: current.toTimeString().slice(0,5),
+          fim: next.toTimeString().slice(0,5),
+          atividades: progDia
+            .filter(p => p.hora >= current.toTimeString().slice(0,5) && p.hora < next.toTimeString().slice(0,5))
+            .map(p => `${p.hora} - ${p.atividade}`)
+        });
+        current = next;
+      }
+    });
+
+    return blocos;
+  };
+
+  const blocos = gerarBlocos();
 
   if (authenticated === null) {
     return (
@@ -290,164 +270,229 @@ function App() {
     );
   }
 
+  const getColorClass = (value) => {
+    switch (value) {
+      case "Intercessão": return "bg-red-500 text-white";
+      case "Música": return "bg-blue-500 text-white";
+      case "Ordem": return "bg-gray-500 text-white";
+      case "Comunicação": return "bg-pink-500 text-white";
+      case "Liturgia": return "bg-purple-600 text-white";
+      case "Louvor": return "bg-orange-500 text-black";
+      case "Limpeza": return "bg-green-500 text-white";
+      case "Lazer": return "bg-yellow-500 text-white";
+      default: return "";
+    }
+  };
+
+  const getDiaBackgroundClass = (dia) => {
+    switch (dia) {
+      case "SEXTA":
+        return "bg-cyan-50";  // vermelho claro
+      case "SÁBADO":
+        return "bg-amber-100";  // verde claro
+      case "DOMINGO":
+        return "bg-red-100";  // azul claro
+      default:
+        return "";
+    }
+  };
+
   return (
-    <div className="p-4 overflow-auto">
-      <h1 className="text-3xl font-bold mb-4">Escala AbbaCamp</h1>
-
-      <div className="mb-4">
-        <button className={`px-4 py-2 mr-2 rounded ${tab === 'programacao' ? 'bg-blue-600 text-white' : 'bg-gray-300'}`} onClick={() => setTab("programacao")}>Por Programação</button>
-        <button className={`px-4 py-2 rounded ${tab === 'horarios' ? 'bg-blue-600 text-white' : 'bg-gray-300'}`} onClick={() => setTab("horarios")}>Por Horário</button>
-      </div>
-
-      <div
-        className="overflow-x-auto mb-2"
-        ref={topScrollRef}
-        onScroll={() => {
-          if (scrollContainerRef.current) {
-            scrollContainerRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    <>
+    <style>
+        {`
+          table {
+            border-collapse: collapse;
           }
-        }}
-      ></div>
 
-      <div className="overflow-auto" ref={scrollContainerRef}>
-        <div className="overflow-x-auto mb-2">
-          <div style={{ minWidth: scrollContainerRef.current?.scrollWidth }} />
-        </div>
-        {tab === "programacao" ? (
-          <table className="border-collapse border border-gray-400 w-full text-sm">
-            <thead>
-              <tr>
-                <th className="border border-gray-300 px-4 py-2">Dia</th>
-                <th className="border border-gray-300 px-4 py-2">Hora</th>
-                <th className="border border-gray-300 px-4 py-2">Atividade</th>
-                {servos.map((s, idx) => (
-                  <th key={idx} className="border border-gray-300 px-2 py-2 text-xs whitespace-nowrap">{s}</th>
+          thead th {
+              position: sticky;
+              top: 0;
+              background-color: white;
+              z-index: 20;
+              box-shadow: 0 2px 5px -1px rgba(0,0,0,0.1);
+            }
+
+          table th, table td {
+            box-sizing: border-box;
+            border: 1px solid #ccc; /* manter borda igual */
+            background-color: white; /* para sticky */
+          }
+
+          table th:nth-child(1),
+          table td:nth-child(1) {
+            position: sticky;
+            left: 0;
+            width: 120px;
+            min-width: 120px;
+            max-width: 120px;
+            background-color: white;
+            z-index: 5;
+            box-shadow: 2px 0 5px -2px rgba(0,0,0,0.3);
+          }
+
+          table th:nth-child(2),
+          table td:nth-child(2) {
+            position: sticky;
+            left: 120px;
+            width: 160px;
+            min-width: 160px;
+            max-width: 160px;
+            background-color: white;
+            z-index: 4;
+            box-shadow: 2px 0 5px -2px rgba(0,0,0,0.2);
+          }
+
+          table th:nth-child(3),
+          table td:nth-child(3) {
+            position: sticky;
+            left: 280px;
+            width: 350px;
+            min-width: 350px;
+            max-width: 350px;
+            background-color: white;
+            z-index: 3;
+            box-shadow: 2px 0 5px -2px rgba(0,0,0,0.1);
+          }
+        `}
+      </style>
+    <div className="p-4">
+      <h1 className="text-2xl font-bold mb-4">Escala AbbaCamp 2025</h1>
+      <div>    
+        <table className="border-collapse border border-gray-400 w-[1500px] text-sm">
+          <thead>
+            <tr>
+              <th className="border border-gray-300 p-2">Dia</th>
+              <th className="border border-gray-300 p-2">Faixa Horária</th>
+              <th className="border border-gray-300 p-2">Programações</th>
+              {servos.map((s, idx) => (
+                <th key={idx} className="border border-gray-300 p-2">{s}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {blocos.map((bloco, i) => (
+              <tr key={i}>
+                <td className={`border border-gray-300 p-2 ${getDiaBackgroundClass(bloco.dia)}`}>{bloco.dia}</td>
+                <td className="border border-gray-300 p-2 min-w-[100px]">{bloco.inicio} - {bloco.fim}</td>
+                <td className="border min-w-[350px] border-gray-300 p-2">
+                  {bloco.atividades.length > 0 ? (
+                    <ul className="list-disc list-inside">
+                      {bloco.atividades.map((atv, idx) => (
+                        <li key={idx}>{atv}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    "--"
+                  )}
+                </td>
+                {servos.map((_, j) => (
+                  <td key={j} className="border border-gray-300 p-2">
+                    <select
+                      disabled={authenticated === false}
+                      value={data[`${i}-${j}`] || ""}
+                      onChange={(e) => {
+                        const newData = { ...data };
+                        newData[`${i}-${j}`] = e.target.value;
+                        setData(newData);
+                        localStorage.setItem("escalaData", JSON.stringify(newData));
+                      }}
+                      className={`w-full min-w-[140px] p-2 border border-gray-200 rounded text-sm `
+                        + getColorClass(data[`${i}-${j}`])
+                      }
+                    >
+                      <option value="">--</option>
+                      {ministerios.map((m, idx) => (
+                        <option key={idx} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </td>
                 ))}
               </tr>
-            </thead>
-            <tbody>
-              {programacao.map((prog, rowIndex) => (
-                <tr key={rowIndex}>
-                  <td className="border border-gray-300 px-2 py-2">{prog.dia}</td>
-                  <td className="border border-gray-300 px-2 py-2">{prog.hora}</td>
-                  <td className="border border-gray-300 px-2 py-2">{prog.atividade}</td>
-                  {servos.map((_, colIndex) => (
-                    <td key={colIndex} className="border border-gray-300 px-2 py-2">
-                      <select
-                        disabled={authenticated === false}
-                        value={data[rowIndex][colIndex]}
-                        onChange={(e) => {
-                          const selected = e.target.value;
-                          if (getConflictingAssignment(rowIndex, colIndex, selected)) {
-                            alert(`Conflito detectado: ${servos[colIndex]} já está designado para ${selected} nesse mesmo horário.`);
-                            return;
-                          }
-                          const newData = [...data];
-                          newData[rowIndex][colIndex] = selected;
-                          setData(newData);
-                        }}
-                        className={`w-full min-w-[140px] p-2 border border-gray-200 rounded text-sm ${getColorClass(data[rowIndex][colIndex])}`}
-                      >
-                        <option value="">--</option>
-                        {ministerios.map((minist, idx) => (
-                          <option key={idx} value={minist}>{minist}</option>
-                        ))}
-                      </select>
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <table className="border-collapse border border-gray-400 w-full text-sm">
-            <thead>
-              <tr>
-                <th className="border border-gray-300 px-4 py-2">Horário</th>
-                {servos.map((s, idx) => (
-                  <th key={idx} className="border border-gray-300 px-2 py-2 text-xs whitespace-nowrap">{s}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {timeSlots.map((slot, rowIndex) => (
-                <tr key={rowIndex}>
-                  <td className="border border-gray-300 px-2 py-2 font-semibold whitespace-nowrap">{slot.label}</td>
-                  {servos.map((_, colIndex) => {
-                    if (!timeSlotData[rowIndex]) timeSlotData[rowIndex] = Array(servos.length).fill("");
-                    const ministry = timeSlotData[rowIndex][colIndex] || getMinistryForSlot(colIndex, slot.start);
-                    const handleChange = (e) => {
-                      const selected = e.target.value;
-                      const newSlotData = [...timeSlotData];
-                      if (!newSlotData[rowIndex]) newSlotData[rowIndex] = Array(servos.length).fill("");
-                      newSlotData[rowIndex][colIndex] = selected;
-                      setTimeSlotData(newSlotData);
-                    };
-                    return (
-                      <td key={colIndex} className="border border-gray-300 px-2 py-2">
-                        <select
-                          disabled={authenticated === false}
-                          value={ministry}
-                          onChange={handleChange}
-                          className={`w-full min-w-[140px] p-2 border border-gray-200 rounded text-sm ${getColorClass(ministry)}`}
-                        >
-                          <option value="">--</option>
-                          {ministerios.map((minist, idx) => (
-                            <option key={idx} value={minist}>{minist}</option>
-                          ))}
-                        </select>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+            ))}
+          </tbody>
+        </table>
       </div>
-
-      <div className="mt-4 space-x-2">
-        <button onClick={exportToExcel} className="px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700">
-          Exportar para Excel
-        </button>
+      <div className="flex space-x-2 my-4 items-center">
         <button
-          onClick={() => setExportType("ministry")}
-          className="px-6 py-3 bg-green-600 text-white rounded hover:bg-green-700"
+          onClick={() => {
+            exportPlanilhaCompleta(blocos, servos, data);
+            setExportType(null);
+            setSelectedExportItem("");
+          }}
+          className="bg-blue-600 text-white px-4 py-2 rounded"
         >
-          Exportar por Ministério
+          Exportar Completa
         </button>
+
         <button
-          onClick={() => setExportType("servo")}
-          className="px-6 py-3 bg-purple-600 text-white rounded hover:bg-purple-700"
+          onClick={() => {
+            setExportType("servo");
+            setSelectedExportItem("");
+          }}
+          className="bg-green-600 text-white px-4 py-2 rounded"
         >
           Exportar por Servo
         </button>
+
+        <button
+          onClick={() => {
+            setExportType("ministerio");
+            setSelectedExportItem("");
+          }}
+          className="bg-purple-600 text-white px-4 py-2 rounded"
+        >
+          Exportar por Ministério
+        </button>
+
+        {/* Mostrar select e botão de exportar após escolha do tipo */}
+        {exportType === "servo" && (
+          <>
+            <select
+              value={selectedExportItem}
+              onChange={(e) => setSelectedExportItem(e.target.value)}
+              className="ml-4 p-2 border rounded"
+            >
+              <option value="">-- Selecione um Servo --</option>
+              {servos.map((s, i) => (
+                <option key={i} value={s}>{s}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => exportPorServoSelecionado(blocos, servos, data, selectedExportItem)}
+              disabled={!selectedExportItem}
+              className="ml-2 bg-green-700 text-white px-3 py-1 rounded"
+            >
+              Exportar
+            </button>
+          </>
+        )}
+
+        {exportType === "ministerio" && (
+          <>
+            <select
+              value={selectedExportItem}
+              onChange={(e) => setSelectedExportItem(e.target.value)}
+              className="ml-4 p-2 border rounded"
+            >
+              <option value="">-- Selecione um Ministério --</option>
+              {ministerios.map((m, i) => (
+                <option key={i} value={m}>{m}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => exportPorMinisterioSelecionado(blocos, servos, data, selectedExportItem)}
+              disabled={!selectedExportItem}
+              className="ml-2 bg-purple-700 text-white px-3 py-1 rounded"
+            >
+              Exportar
+            </button>
+          </>
+        )}
       </div>
-
-      {exportType && (
-        <div className="mt-4">
-          <label className="mr-2 font-medium">{exportType === 'ministry' ? 'Ministério' : 'Servo'}:</label>
-          <select
-            value={exportValue}
-            onChange={(e) => setExportValue(e.target.value)}
-            className="border border-gray-300 rounded px-3 py-2 text-sm"
-          >
-            <option value="">Selecione</option>
-            {(exportType === 'ministry' ? ministerios : servos).map((item, idx) => (
-              <option key={idx} value={item}>{item}</option>
-            ))}
-          </select>
-          <button
-            onClick={exportFiltered}
-            className="ml-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          >
-            Confirmar Exportação
-          </button>
-        </div>
-      )}
     </div>
+    </>
   );
-
 }
 
 export default App;
