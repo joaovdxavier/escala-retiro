@@ -1,5 +1,10 @@
-import React, { useState, useRef } from "react";
+import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
+import { login } from "./service/authService";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "./firebase";
+import { salvarEscalaNoFirebase, buscarEscalaDoFirebase } from "./service/firestoreService"; // Funções de salvar e buscar no Firestore
+
 
 
 const ministerios = [
@@ -110,26 +115,57 @@ function App() {
   const [authenticated, setAuthenticated] = useState(null);
   const [loginUser, setLoginUser] = useState("");
   const [loginPass, setLoginPass] = useState("");
-  const [data, setData] = useState(() => {
-    const stored = localStorage.getItem("escalaData");
-    return stored ? JSON.parse(stored) : {};
-  });
+  const [data, setData] = useState("");
     // Estado para controlar filtro e seleção
   const [exportType, setExportType] = useState(null); // "servo" ou "ministerio"
   const [selectedExportItem, setSelectedExportItem] = useState(""); // nome do servo ou ministério
 
+  const [user, setUser] = useState(null); // Estado do usuário autenticado
+
+
+
+  // Carregar dados do Firestore quando o usuário estiver logado
+  useEffect(() => {
+    if (user) {
+      buscarEscalaDoFirebase(user.uid).then((dados) => {
+        setData(dados);
+      });
+    }
+  }, [user]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (usuario) => {
+      if (usuario) {
+        setUser(usuario);
+      } else {
+        setUser(null);
+      }
+    });
+
+    return unsubscribe;
+  }, []);
 
   const handleLogin = async () => {
-    const senhaHash = await gerarHashSenha(loginPass);
-    const valid = CREDENTIALS.some(
-      (cred) => cred.username === loginUser && cred.password === senhaHash
-    );
-    if (valid) {
+    try {
+      await login(loginUser, loginPass);
       setAuthenticated(true);
-    } else {
-      alert("Credenciais inválidas.");
+    } catch (error) {
+      alert("Erro no login: " + error.message);
     }
   };
+
+  const handleSalvar = async (e, i, j) => {
+    const user = auth.currentUser;
+    if (user) {
+      const valor = e.target.value;
+      const newData = { ...data, [`${i}-${j}`]: valor };
+      setData(newData);
+      await salvarEscalaNoFirebase(user.uid, newData);
+      // opcional: alert("Dados salvos no Firebase!");
+    } else {
+      alert("Usuário não autenticado.");
+    }
+  }
 
   function exportPlanilhaCompleta(blocos, servos, data) {
     const rows = blocos.map((bloco, i) => {
@@ -284,16 +320,6 @@ function App() {
     }
   };
 
-  async function gerarHashSenha(senha) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(senha);
-    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    // converte bytes para string hexadecimal
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
-    return hashHex;
-  }
-
   const getDiaBackgroundClass = (dia) => {
     switch (dia) {
       case "SEXTA":
@@ -401,12 +427,7 @@ function App() {
                     <select
                       disabled={authenticated === false}
                       value={data[`${i}-${j}`] || ""}
-                      onChange={(e) => {
-                        const newData = { ...data };
-                        newData[`${i}-${j}`] = e.target.value;
-                        setData(newData);
-                        localStorage.setItem("escalaData", JSON.stringify(newData));
-                      }}
+                      onChange={(e) => handleSalvar(e, i, j)}
                       className={`w-full min-w-[140px] p-2 border border-gray-200 rounded text-sm `
                         + getColorClass(data[`${i}-${j}`])
                       }
